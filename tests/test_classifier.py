@@ -66,3 +66,22 @@ def test_quoted_title_is_case_insensitive_and_ignores_wrapper():
     assert result is not None
     assert result.meeting_name == "Совещание Техническое"
     assert result.folder == "Совещание Техническое"
+
+
+def test_short_sales_title_inside_quotes():
+    classifier = MeetingClassifier(RULES)
+    result = classifier.classify(
+        "Конспект встречи «продажи» от 14.07.2026"
+    )
+    assert result is not None
+    assert result.meeting_name == "Совещание по Продажам"
+    assert result.folder == "Совещание по Продажам"
+
+
+def test_short_titles_are_case_insensitive():
+    classifier = MeetingClassifier(RULES)
+    result = classifier.classify(
+        "Конспект встречи «мАрКеТиНг» от 14.07.2026"
+    )
+    assert result is not None
+    assert result.meeting_name == "Совещание по Маркетингу"

@@ -204,9 +204,15 @@ class MeetingSorterService:
         uploaded_paths: list[str] = []
 
         for attachment in message.attachments:
-            filename = self._validate_original_filename(
+            filename = self._sanitize_yandex_filename(
                 attachment.original_filename,
             )
+            if filename != attachment.original_filename.strip():
+                LOGGER.info(
+                    "Adjusted attachment filename for Yandex Disk: %s -> %s",
+                    attachment.original_filename,
+                    filename,
+                )
             target_path = self._join_disk_path(target_folder, filename)
             if self.disk.exists(target_path):
                 LOGGER.info(
@@ -238,7 +244,7 @@ class MeetingSorterService:
         )
 
     @staticmethod
-    def _validate_original_filename(value: str) -> str:
+    def _sanitize_yandex_filename(value: str) -> str:
         filename = value.strip()
         if not filename or filename in {".", ".."}:
             raise ValueError("Attachment has an empty or unsafe filename")
@@ -246,6 +252,15 @@ class MeetingSorterService:
             raise ValueError(
                 f"Attachment filename contains an unsafe character: {value!r}"
             )
+
+        # Yandex Disk treats an ASCII colon as a storage-prefix separator
+        # (for example, disk:/path), so a colon cannot be used inside a
+        # resource name. Only the filename is normalized; file bytes are not
+        # modified.
+        filename = filename.replace(":", "-")
+
+        if not filename or filename in {".", ".."}:
+            raise ValueError("Attachment has an empty filename after sanitizing")
         return filename
 
     @staticmethod
