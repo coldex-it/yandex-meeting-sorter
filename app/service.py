@@ -80,8 +80,52 @@ class MeetingSorterService:
 
         return processed_count
 
-    def _process_message(self, message: ParsedMessage) -> None:
-        if self.store.is_processed(message.uid, message.message_id):
+    def retry_ignored_unknown_subjects(self) -> int:
+        uids = self.store.list_uids_by_status("ignored_unknown_subject")
+        if not uids:
+            LOGGER.info("No previously ignored unknown subjects to retry")
+            return 0
+
+        uploaded_count = 0
+
+        with self.mail_reader_factory() as mail:
+            for uid in uids:
+                try:
+                    message = mail.fetch(uid)
+
+                    if self.classifier.classify(message.subject) is None:
+                        LOGGER.info(
+                            "Still unknown after rules update: %s",
+                            message.subject,
+                        )
+                        continue
+
+                    self._process_message(message, force=True)
+                    uploaded_count += 1
+
+                except Exception:
+                    LOGGER.exception(
+                        "Failed to retry previously ignored email UID %d",
+                        uid,
+                    )
+
+        LOGGER.info(
+            "Retry complete: %d of %d previously ignored email(s) uploaded",
+            uploaded_count,
+            len(uids),
+        )
+
+        return uploaded_count
+
+    def _process_message(
+        self,
+        message: ParsedMessage,
+        force: bool = False,
+    ) -> None:
+                if not force and self.store.is_processed(
+            message.uid,
+            message.message_id,
+        ):
             LOGGER.info("Email UID %d already processed", message.uid)
             return
 

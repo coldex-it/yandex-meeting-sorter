@@ -63,6 +63,13 @@ class StateStore:
         ).fetchone()
         return row is not None
 
+    def list_uids_by_status(self, status: str) -> list[int]:
+        rows = self.connection.execute(
+            "SELECT uid FROM processed_messages WHERE status = ? ORDER BY uid",
+            (status,),
+        ).fetchall()
+        return [int(row[0]) for row in rows]
+
     def record(
         self,
         uid: int,
@@ -74,9 +81,16 @@ class StateStore:
     ) -> None:
         self.connection.execute(
             """
-            INSERT OR IGNORE INTO processed_messages(
+            INSERT INTO processed_messages(
                 uid, message_id, subject, status, disk_paths, details, processed_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(uid) DO UPDATE SET
+                message_id = excluded.message_id,
+                subject = excluded.subject,
+                status = excluded.status,
+                disk_paths = excluded.disk_paths,
+                details = excluded.details,
+                processed_at = excluded.processed_at
             """,
             (
                 uid,
