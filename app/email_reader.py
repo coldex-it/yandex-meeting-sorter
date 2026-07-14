@@ -7,7 +7,7 @@ import logging
 from datetime import datetime
 from email.header import decode_header, make_header
 from email.message import Message
-from email.utils import parsedate_to_datetime
+from email.utils import parsedate_to_datetime, parseaddr
 from zoneinfo import ZoneInfo
 
 from .models import ParsedMessage, TextAttachment
@@ -86,6 +86,7 @@ class YandexMailReader:
 
         message = email.message_from_bytes(raw_message)
         subject = self._decode_header(message.get("Subject", ""))
+        sender = self._sender_address(message)
         message_id = message.get("Message-ID", "").strip()
         if not message_id:
             message_id = f"uid:{uid}:{hashlib.sha256(raw_message).hexdigest()}"
@@ -97,9 +98,15 @@ class YandexMailReader:
             uid=uid,
             message_id=message_id,
             subject=subject,
+            sender=sender,
             meeting_datetime=meeting_datetime,
             attachments=attachments,
         )
+
+    def _sender_address(self, message: Message) -> str:
+        raw_from = self._decode_header(message.get("From", ""))
+        _, address = parseaddr(raw_from)
+        return address.strip().casefold()
 
     @staticmethod
     def _decode_header(value: str) -> str:

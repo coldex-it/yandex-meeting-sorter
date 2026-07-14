@@ -11,6 +11,19 @@ from .storage import StateStore
 
 LOGGER = logging.getLogger(__name__)
 
+ALLOWED_SENDERS = frozenset(
+    {
+        "keeper@telemost.yandex.ru",
+        "coldex@tehnomir.biz",
+    }
+)
+
+EXCLUDED_SUBJECT_PREFIXES = (
+    "запись звонка",
+    "запись встречи",
+    "не удаётся загрузить на диск",
+)
+
 
 class MeetingSorterService:
     def __init__(
@@ -166,6 +179,38 @@ class MeetingSorterService:
             message.message_id,
         ):
             LOGGER.info("Email UID %d already processed", message.uid)
+            return
+
+        sender = message.sender.strip().casefold()
+        if sender not in ALLOWED_SENDERS:
+            LOGGER.info(
+                "Ignored email from sender %s: %s",
+                sender or "<missing>",
+                message.subject,
+            )
+            self.store.record(
+                message.uid,
+                message.message_id,
+                message.subject,
+                status="ignored_sender",
+                details=sender or "missing From address",
+            )
+            return
+
+        normalized_subject = message.subject.lstrip().casefold()
+        if normalized_subject.startswith(EXCLUDED_SUBJECT_PREFIXES):
+            LOGGER.info(
+                "Ignored excluded subject from %s: %s",
+                sender,
+                message.subject,
+            )
+            self.store.record(
+                message.uid,
+                message.message_id,
+                message.subject,
+                status="ignored_subject_prefix",
+                details=sender,
+            )
             return
 
         classification = self.classifier.classify(message.subject)

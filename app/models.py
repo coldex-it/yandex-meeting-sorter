@@ -21,5 +21,6 @@ class ParsedMessage:
     uid: int
     message_id: str
     subject: str
+    sender: str
     meeting_datetime: datetime
     attachments: list[TextAttachment]
