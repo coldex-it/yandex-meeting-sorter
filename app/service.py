@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import PurePosixPath
 
 from .classifier import MeetingClassifier
@@ -34,7 +33,10 @@ class MeetingSorterService:
 
     def initialize(self) -> None:
         info = self.disk.get_disk_info()
-        LOGGER.info("Connected to Yandex Disk as %s", info.get("user", {}).get("login", "unknown"))
+        LOGGER.info(
+            "Connected to Yandex Disk as %s",
+            info.get("user", {}).get("login", "unknown"),
+        )
         self.disk.ensure_folder_tree(self.disk_root)
 
         if self.store.get_last_uid() is not None:
@@ -48,7 +50,8 @@ class MeetingSorterService:
             return
 
         if self.process_existing:
-            start_uid = max(0, uids[-min(len(uids), self.initial_lookback_messages)] - 1)
+            start_index = min(len(uids), self.initial_lookback_messages)
+            start_uid = max(0, uids[-start_index] - 1)
             self.store.set_last_uid(start_uid)
             LOGGER.info(
                 "First run: will inspect up to %d existing emails",
@@ -73,12 +76,53 @@ class MeetingSorterService:
                     self._process_message(message)
                     processed_count += 1
                 except Exception:
-                    LOGGER.exception("Failed to process email UID %d; it will be retried", uid)
+                    LOGGER.exception(
+                        "Failed to process email UID %d; it will be retried",
+                        uid,
+                    )
                     break
                 else:
                     self.store.set_last_uid(uid)
 
         return processed_count
+
+    def scan_recent(self, limit: int) -> int:
+        if limit < 1:
+            raise ValueError("scan limit must be greater than zero")
+
+        with self.mail_reader_factory() as mail:
+            uids = mail.list_all_uids()[-limit:]
+            inspected_count = 0
+
+            for uid in uids:
+                try:
+                    message = mail.fetch(uid)
+                    status = self.store.get_status(
+                        message.uid,
+                        message.message_id,
+                    )
+
+                    if status == "uploaded":
+                        LOGGER.info(
+                            "Email UID %d already uploaded; skipped",
+                            uid,
+                        )
+                        continue
+
+                    self._process_message(
+                        message,
+                        force=status is not None,
+                    )
+                    inspected_count += 1
+                except Exception:
+                    LOGGER.exception("Failed to scan email UID %d", uid)
+
+        LOGGER.info(
+            "Recent scan complete: %d email(s) inspected from the last %d",
+            inspected_count,
+            len(uids),
+        )
+        return inspected_count
 
     def retry_ignored_unknown_subjects(self) -> int:
         uids = self.store.list_uids_by_status("ignored_unknown_subject")
@@ -87,22 +131,18 @@ class MeetingSorterService:
             return 0
 
         uploaded_count = 0
-
         with self.mail_reader_factory() as mail:
             for uid in uids:
                 try:
                     message = mail.fetch(uid)
-
                     if self.classifier.classify(message.subject) is None:
                         LOGGER.info(
                             "Still unknown after rules update: %s",
                             message.subject,
                         )
                         continue
-
                     self._process_message(message, force=True)
                     uploaded_count += 1
-
                 except Exception:
                     LOGGER.exception(
                         "Failed to retry previously ignored email UID %d",
@@ -114,7 +154,6 @@ class MeetingSorterService:
             uploaded_count,
             len(uids),
         )
-
         return uploaded_count
 
     def _process_message(
@@ -131,7 +170,10 @@ class MeetingSorterService:
 
         classification = self.classifier.classify(message.subject)
         if classification is None:
-            LOGGER.info("Ignored unknown meeting subject: %s", message.subject)
+            LOGGER.info(
+                "Ignored unknown meeting subject: %s",
+                message.subject,
+            )
             self.store.record(
                 message.uid,
                 message.message_id,
@@ -141,7 +183,10 @@ class MeetingSorterService:
             return
 
         if not message.attachments:
-            LOGGER.warning("Known meeting email has no TXT/MD attachment: %s", message.subject)
+            LOGGER.warning(
+                "Known meeting email has no TXT/MD attachment: %s",
+                message.subject,
+            )
             self.store.record(
                 message.uid,
                 message.message_id,
@@ -150,19 +195,32 @@ class MeetingSorterService:
             )
             return
 
-        target_folder = self._join_disk_path(self.disk_root, classification.folder)
+        target_folder = self._join_disk_path(
+            self.disk_root,
+            classification.folder,
+        )
         self.disk.ensure_folder_tree(target_folder)
 
-        date_prefix = message.meeting_datetime.strftime("%Y-%m-%d")
-        safe_meeting_name = self._safe_filename(classification.meeting_name)
         uploaded_paths: list[str] = []
 
-        for index, attachment in enumerate(message.attachments, start=1):
-            suffix = "" if len(message.attachments) == 1 else f"_{index}"
-            filename = f"{date_prefix}_{safe_meeting_name}{suffix}.txt"
-            desired_path = self._join_disk_path(target_folder, filename)
-            target_path = self.disk.unique_path(desired_path)
-            self.disk.upload_bytes(target_path, attachment.content_utf8, overwrite=False)
+        for attachment in message.attachments:
+            filename = self._validate_original_filename(
+                attachment.original_filename,
+            )
+            target_path = self._join_disk_path(target_folder, filename)
+            if self.disk.exists(target_path):
+                LOGGER.info(
+                    "File already exists on Yandex Disk; skipped: %s",
+                    target_path,
+                )
+                uploaded_paths.append(target_path)
+                continue
+
+            self.disk.upload_bytes(
+                target_path,
+                attachment.content,
+                overwrite=False,
+            )
             uploaded_paths.append(target_path)
             LOGGER.info(
                 "Uploaded email UID %d attachment %s to %s",
@@ -180,10 +238,15 @@ class MeetingSorterService:
         )
 
     @staticmethod
-    def _safe_filename(value: str) -> str:
-        value = re.sub(r"[\\/:*?\"<>|\x00-\x1f]", "-", value)
-        value = re.sub(r"\s+", " ", value).strip(" .")
-        return value[:180] or "Совещание"
+    def _validate_original_filename(value: str) -> str:
+        filename = value.strip()
+        if not filename or filename in {".", ".."}:
+            raise ValueError("Attachment has an empty or unsafe filename")
+        if "/" in filename or "\x00" in filename:
+            raise ValueError(
+                f"Attachment filename contains an unsafe character: {value!r}"
+            )
+        return filename
 
     @staticmethod
     def _join_disk_path(*parts: str) -> str:

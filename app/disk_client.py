@@ -108,7 +108,7 @@ class YandexDiskClient:
             method=method,
             url=upload_url,
             data=content,
-            headers={"Content-Type": "text/plain; charset=utf-8"},
+            headers={"Content-Type": "application/octet-stream"},
             timeout=self.timeout,
         )
         if upload_response.status_code not in (201, 202):

@@ -13,7 +13,7 @@ class Classification:
 @dataclass(frozen=True)
 class TextAttachment:
     original_filename: str
-    content_utf8: bytes
+    content: bytes
 
 
 @dataclass(frozen=True)

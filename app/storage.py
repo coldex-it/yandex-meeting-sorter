@@ -70,6 +70,18 @@ class StateStore:
         ).fetchall()
         return [int(row[0]) for row in rows]
 
+    def get_status(self, uid: int, message_id: str) -> str | None:
+        row = self.connection.execute(
+            """
+            SELECT status
+            FROM processed_messages
+            WHERE uid = ? OR message_id = ?
+            LIMIT 1
+            """,
+            (uid, message_id),
+        ).fetchone()
+        return str(row[0]) if row else None
+
     def record(
         self,
         uid: int,

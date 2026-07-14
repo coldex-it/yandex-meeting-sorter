@@ -18,6 +18,11 @@ class Rule:
 
 
 class MeetingClassifier:
+    QUOTED_TITLE_PATTERNS = (
+        re.compile(r"«\s*(.*?)\s*»", re.UNICODE),
+        re.compile(r'"\s*(.*?)\s*"', re.UNICODE),
+    )
+
     def __init__(self, rules_path: Path):
         raw = yaml.safe_load(rules_path.read_text(encoding="utf-8")) or {}
         rules_data = raw.get("rules", [])
@@ -40,10 +45,28 @@ class MeetingClassifier:
     def normalize_subject(subject: str) -> str:
         return re.sub(r"\s+", " ", subject.replace("\u00a0", " ")).strip()
 
+    @classmethod
+    def extract_meeting_title(cls, subject: str) -> str:
+        meeting_title, _ = cls._classification_target(subject)
+        return meeting_title
+
+    @classmethod
+    def _classification_target(cls, subject: str) -> tuple[str, bool]:
+        normalized = cls.normalize_subject(subject)
+        for pattern in cls.QUOTED_TITLE_PATTERNS:
+            match = pattern.search(normalized)
+            if match:
+                return cls.normalize_subject(match.group(1)), True
+        return normalized, False
+
     def classify(self, subject: str) -> Classification | None:
-        normalized = self.normalize_subject(subject)
+        meeting_title, was_quoted = self._classification_target(subject)
         for rule in self.rules:
-            match = rule.pattern.search(normalized)
+            match = (
+                rule.pattern.fullmatch(meeting_title)
+                if was_quoted
+                else rule.pattern.search(meeting_title)
+            )
             if not match:
                 continue
 

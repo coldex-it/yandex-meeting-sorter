@@ -137,24 +137,10 @@ class YandexMailReader:
             if payload is None:
                 continue
 
-            charset = part.get_content_charset()
-            text = self._decode_text(payload, charset)
             result.append(
                 TextAttachment(
                     original_filename=filename,
-                    content_utf8=text.encode("utf-8"),
+                    content=payload,
                 )
             )
         return result
-
-    @staticmethod
-    def _decode_text(payload: bytes, declared_charset: str | None) -> str:
-        candidates = [declared_charset, "utf-8-sig", "utf-8", "cp1251", "latin-1"]
-        for charset in candidates:
-            if not charset:
-                continue
-            try:
-                return payload.decode(charset)
-            except (LookupError, UnicodeDecodeError):
-                continue
-        return payload.decode("utf-8", errors="replace")

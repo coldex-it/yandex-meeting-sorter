@@ -64,6 +64,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Validate environment and rules without connecting to external services",
     )
+    parser.add_argument(
+        "--retry-ignored",
+        action="store_true",
+        help="Retry emails previously stored as ignored_unknown_subject",
+    )
+    parser.add_argument(
+        "--scan-last",
+        type=int,
+        metavar="N",
+        help="Inspect the last N mailbox emails, regardless of the saved last UID",
+    )
     return parser.parse_args()
 
 
@@ -87,6 +98,17 @@ def main() -> int:
     service, store = build_service(settings)
     try:
         service.initialize()
+
+        if args.retry_ignored:
+            service.retry_ignored_unknown_subjects()
+            return 0
+
+        if args.scan_last is not None:
+            if args.scan_last < 1:
+                raise ValueError("--scan-last must be greater than zero")
+            service.scan_recent(args.scan_last)
+            return 0
+
         while not STOP_REQUESTED:
             try:
                 count = service.run_once()
