@@ -122,7 +122,7 @@ class MeetingSorterService:
         message: ParsedMessage,
         force: bool = False,
     ) -> None:
-                if not force and self.store.is_processed(
+        if not force and self.store.is_processed(
             message.uid,
             message.message_id,
         ):
