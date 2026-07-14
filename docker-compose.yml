@@ -1,0 +1,22 @@
+services:
+  meeting-sorter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yandex-meeting-sorter
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.main", "--check-config"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
