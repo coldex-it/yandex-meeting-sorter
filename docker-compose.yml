@@ -1,21 +1,54 @@
+name: yandex-meeting-sorter
 services:
   meeting-sorter:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: yandex-meeting-sorter
+    hostname: yandex-meeting-sorter
     restart: unless-stopped
     env_file:
       - .env
     volumes:
-      - ./config:/app/config:ro
-      - ./data:/app/data
+      - type: bind
+        source: ./config
+        target: /app/config
+        read_only: true
+
+      - type: bind
+        source: ./data
+        target: /app/data
+
+    command:
+      - /bin/sh
+      - -c
+      - |
+        trap 'exit 0' TERM INT
+
+        echo "[$$(date -Iseconds)] Meeting sorter scheduler started"
+
+        while true; do
+          echo "[$$(date -Iseconds)] Scanning last 10 mailbox emails"
+
+          python -m app.main --scan-last 10
+          status=$$?
+
+          echo "[$$(date -Iseconds)] Scan finished with exit code $$status"
+          echo "[$$(date -Iseconds)] Next scan in 3 hours"
+
+          sleep 10800
+        done
     healthcheck:
       test: ["CMD", "python", "-m", "app.main", "--check-config"]
       interval: 60s
       timeout: 10s
       retries: 3
       start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
     security_opt:
       - no-new-privileges:true
     cap_drop:
