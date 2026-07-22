@@ -82,6 +82,34 @@ class StateStore:
         ).fetchone()
         return str(row[0]) if row else None
 
+    def get_disk_paths(self, uid: int, message_id: str) -> list[str]:
+        row = self.connection.execute(
+            """
+            SELECT disk_paths
+            FROM processed_messages
+            WHERE uid = ? OR message_id = ?
+            LIMIT 1
+            """,
+            (uid, message_id),
+        ).fetchone()
+        if not row or not row[0]:
+            return []
+        return [path for path in str(row[0]).splitlines() if path.strip()]
+
+    def get_details(self, uid: int, message_id: str) -> str | None:
+        row = self.connection.execute(
+            """
+            SELECT details
+            FROM processed_messages
+            WHERE uid = ? OR message_id = ?
+            LIMIT 1
+            """,
+            (uid, message_id),
+        ).fetchone()
+        if not row or row[0] is None:
+            return None
+        return str(row[0])
+
     def record(
         self,
         uid: int,

@@ -10,6 +10,7 @@ from email.message import Message
 from email.utils import parsedate_to_datetime, parseaddr
 from zoneinfo import ZoneInfo
 
+from .meeting_summary import extract_meeting_summary
 from .models import ParsedMessage, TextAttachment
 
 LOGGER = logging.getLogger(__name__)
@@ -93,6 +94,7 @@ class YandexMailReader:
 
         meeting_datetime = self._message_datetime(message)
         attachments = self._extract_text_attachments(message)
+        self._append_generated_summary(message, attachments)
 
         return ParsedMessage(
             uid=uid,
@@ -151,3 +153,45 @@ class YandexMailReader:
                 )
             )
         return result
+
+    @staticmethod
+    def _append_generated_summary(
+        message: Message,
+        attachments: list[TextAttachment],
+    ) -> None:
+        summary_text = extract_meeting_summary(message)
+        if not summary_text:
+            return
+
+        transcript = next(
+            (
+                attachment
+                for attachment in attachments
+                if not attachment.original_filename.strip().casefold().startswith(
+                    "конспект "
+                )
+            ),
+            None,
+        )
+        if transcript is None:
+            LOGGER.warning(
+                "Yandex meeting summary found, but no transcript attachment is available"
+            )
+            return
+
+        summary_filename = f"Конспект {transcript.original_filename.strip()}"
+        if any(
+            attachment.original_filename.strip().casefold()
+            == summary_filename.casefold()
+            for attachment in attachments
+        ):
+            LOGGER.info("Summary attachment already exists: %s", summary_filename)
+            return
+
+        attachments.append(
+            TextAttachment(
+                original_filename=summary_filename,
+                content=summary_text.encode("utf-8"),
+            )
+        )
+        LOGGER.info("Extracted meeting summary from email body: %s", summary_filename)
