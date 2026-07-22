@@ -24,6 +24,8 @@ EXCLUDED_SUBJECT_PREFIXES = (
     "не удаётся загрузить на диск",
 )
 
+SUMMARY_PROCESSING_VERSION = "summary_v1"
+
 
 class MeetingSorterService:
     def __init__(
@@ -115,12 +117,22 @@ class MeetingSorterService:
                         message.message_id,
                     )
 
-                    if status == "uploaded":
+                    if status == "uploaded" and self._summary_processing_complete(
+                        message.uid,
+                        message.message_id,
+                    ):
                         LOGGER.info(
-                            "Email UID %d already uploaded; skipped",
+                            "Email UID %d already uploaded with summary check; skipped",
                             uid,
                         )
                         continue
+
+                    if status == "uploaded":
+                        LOGGER.info(
+                            "Email UID %d was uploaded before summary extraction; "
+                            "checking it again",
+                            uid,
+                        )
 
                     self._process_message(
                         message,
@@ -247,11 +259,15 @@ class MeetingSorterService:
         self.disk.ensure_folder_tree(target_folder)
 
         uploaded_paths: list[str] = []
+        has_summary_attachment = False
 
         for attachment in message.attachments:
             filename = self._sanitize_yandex_filename(
                 attachment.original_filename,
             )
+            if filename.casefold().startswith("конспект "):
+                has_summary_attachment = True
+
             if filename != attachment.original_filename.strip():
                 LOGGER.info(
                     "Adjusted attachment filename for Yandex Disk: %s -> %s",
@@ -280,12 +296,26 @@ class MeetingSorterService:
                 target_path,
             )
 
+        summary_result = "saved" if has_summary_attachment else "not_found"
         self.store.record(
             message.uid,
             message.message_id,
             message.subject,
             status="uploaded",
             disk_paths=uploaded_paths,
+            details=f"{SUMMARY_PROCESSING_VERSION}_{summary_result}",
+        )
+
+    def _summary_processing_complete(self, uid: int, message_id: str) -> bool:
+        details = self.store.get_details(uid, message_id) or ""
+        if details.startswith(f"{SUMMARY_PROCESSING_VERSION}_"):
+            return True
+
+        # Compatibility for a database that already recorded the generated
+        # summary path but does not yet have a versioned details marker.
+        return any(
+            PurePosixPath(path).name.casefold().startswith("конспект ")
+            for path in self.store.get_disk_paths(uid, message_id)
         )
 
     @staticmethod
