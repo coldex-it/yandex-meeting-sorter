@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from app.classifier import MeetingClassifier
 
 
@@ -85,3 +87,21 @@ def test_short_titles_are_case_insensitive():
     )
     assert result is not None
     assert result.meeting_name == "Совещание по Маркетингу"
+
+
+@pytest.mark.parametrize("prefix", ["Coldex - ", "COLDEX — ", "coldex–", "Coldex: "])
+def test_company_prefix_in_quoted_meeting_title(prefix):
+    classifier = MeetingClassifier(RULES)
+    result = classifier.classify(
+        f"Конспект встречи «{prefix}Совещание по Продажам» от 01.10.2026"
+    )
+    assert result is not None
+    assert result.meeting_name == "Совещание по Продажам"
+    assert result.folder == "Совещание по Продажам"
+
+
+def test_company_prefix_does_not_enable_partial_quoted_title_matches():
+    classifier = MeetingClassifier(RULES)
+    assert classifier.classify(
+        "Конспект встречи «Coldex - Совещание по Продажам другого отдела»"
+    ) is None

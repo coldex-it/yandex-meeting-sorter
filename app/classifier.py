@@ -18,6 +18,7 @@ class Rule:
 
 
 class MeetingClassifier:
+    COMPANY_PREFIX_RE = re.compile(r"^Coldex\s*[-–—:]\s*", re.IGNORECASE)
     QUOTED_TITLE_PATTERNS = (
         re.compile(r"«\s*(.*?)\s*»", re.UNICODE),
         re.compile(r'"\s*(.*?)\s*"', re.UNICODE),
@@ -61,6 +62,7 @@ class MeetingClassifier:
 
     def classify(self, subject: str) -> Classification | None:
         meeting_title, was_quoted = self._classification_target(subject)
+        meeting_title = self.COMPANY_PREFIX_RE.sub("", meeting_title).strip()
         for rule in self.rules:
             match = (
                 rule.pattern.fullmatch(meeting_title)

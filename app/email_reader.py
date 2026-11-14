@@ -4,7 +4,7 @@ import email
 import hashlib
 import imaplib
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from email.header import decode_header, make_header
 from email.message import Message
 from email.utils import parsedate_to_datetime, parseaddr
@@ -72,6 +72,18 @@ class YandexMailReader:
         if status != "OK" or not data:
             raise RuntimeError("IMAP search failed")
         return [int(uid) for uid in data[0].split() if uid]
+
+    def list_uids_since(self, since: date) -> list[int]:
+        # IMAP requires English month names regardless of the container locale.
+        months = (
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        )
+        imap_date = f"{since.day:02d}-{months[since.month - 1]}-{since.year:04d}"
+        status, data = self._conn().uid("search", None, f"SINCE {imap_date}")
+        if status != "OK" or not data:
+            raise RuntimeError("IMAP date search failed")
+        return sorted(int(uid) for uid in data[0].split() if uid)
 
     def fetch(self, uid: int) -> ParsedMessage:
         status, data = self._conn().uid("fetch", str(uid), "(BODY.PEEK[])")

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
+from datetime import date
 from pathlib import PurePosixPath
 
 from .classifier import MeetingClassifier
@@ -85,6 +87,12 @@ class MeetingSorterService:
 
         with self.mail_reader_factory() as mail:
             uids = mail.list_uids_after(last_uid)
+            LOGGER.info(
+                "Checking mailbox %s: %d email(s) after UID %d",
+                mail.mailbox,
+                len(uids),
+                last_uid,
+            )
             for uid in sorted(uids):
                 try:
                     message = mail.fetch(uid)
@@ -95,7 +103,7 @@ class MeetingSorterService:
                         "Failed to process email UID %d; it will be retried",
                         uid,
                     )
-                    break
+                    raise RuntimeError(f"Failed to process email UID {uid}") from None
                 else:
                     self.store.set_last_uid(uid)
 
@@ -106,47 +114,65 @@ class MeetingSorterService:
             raise ValueError("scan limit must be greater than zero")
 
         with self.mail_reader_factory() as mail:
-            uids = mail.list_all_uids()[-limit:]
-            inspected_count = 0
+            uids = sorted(mail.list_all_uids())[-limit:]
+            LOGGER.info("Scanning last %d email(s) in mailbox %s", len(uids), mail.mailbox)
+            return self._scan_uids(mail, uids)
 
-            for uid in uids:
-                try:
-                    message = mail.fetch(uid)
-                    status = self.store.get_status(
-                        message.uid,
-                        message.message_id,
+    def scan_since(self, since: date) -> int:
+        with self.mail_reader_factory() as mail:
+            uids = mail.list_uids_since(since)
+            LOGGER.info(
+                "Scanning mailbox %s since %s (IMAP received date): %d email(s)",
+                mail.mailbox,
+                since.isoformat(),
+                len(uids),
+            )
+            return self._scan_uids(mail, uids)
+
+    def _scan_uids(self, mail: YandexMailReader, uids: list[int]) -> int:
+        inspected_count = 0
+        outcomes: Counter[str] = Counter()
+        for uid in sorted(uids):
+            try:
+                message = mail.fetch(uid)
+                status = self.store.get_status(message.uid, message.message_id)
+
+                if status == "uploaded" and self._summary_processing_complete(
+                    message.uid, message.message_id,
+                ):
+                    LOGGER.info(
+                        "Email UID %d already uploaded with summary check; skipped", uid,
+                    )
+                    outcomes["already_uploaded"] += 1
+                    continue
+
+                if status == "uploaded":
+                    LOGGER.info(
+                        "Email UID %d was uploaded before summary extraction; "
+                        "checking it again", uid,
                     )
 
-                    if status == "uploaded" and self._summary_processing_complete(
-                        message.uid,
-                        message.message_id,
-                    ):
-                        LOGGER.info(
-                            "Email UID %d already uploaded with summary check; skipped",
-                            uid,
-                        )
-                        continue
-
-                    if status == "uploaded":
-                        LOGGER.info(
-                            "Email UID %d was uploaded before summary extraction; "
-                            "checking it again",
-                            uid,
-                        )
-
-                    self._process_message(
-                        message,
-                        force=status is not None,
-                    )
-                    inspected_count += 1
-                except Exception:
-                    LOGGER.exception("Failed to scan email UID %d", uid)
+                self._process_message(message, force=status is not None)
+                inspected_count += 1
+                result = self.store.get_status(message.uid, message.message_id)
+                outcomes[result or "unknown"] += 1
+            except Exception:
+                outcomes["failed"] += 1
+                LOGGER.exception("Failed to scan email UID %d", uid)
 
         LOGGER.info(
-            "Recent scan complete: %d email(s) inspected from the last %d",
+            "Scan complete: %d email(s) inspected of %d selected; outcomes: %s",
             inspected_count,
             len(uids),
+            dict(outcomes),
         )
+        if not outcomes["uploaded"] and not outcomes["already_uploaded"]:
+            LOGGER.warning(
+                "No meeting files saved by this scan. Check the selected mailbox, "
+                "date range, sender and subject filters if summaries were expected."
+            )
+        if outcomes["failed"]:
+            raise RuntimeError(f"Failed to scan {outcomes['failed']} email(s); rerun the scan")
         return inspected_count
 
     def retry_ignored_unknown_subjects(self) -> int:

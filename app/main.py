@@ -5,6 +5,7 @@ import logging
 import signal
 import sys
 import time
+from datetime import date
 from functools import partial
 
 from .classifier import MeetingClassifier
@@ -58,22 +59,29 @@ def build_service(settings: Settings) -> tuple[MeetingSorterService, StateStore]
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Sort Yandex meeting transcripts")
-    parser.add_argument("--once", action="store_true", help="Check mailbox once and exit")
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--once", action="store_true", help="Check mailbox once and exit")
+    mode.add_argument(
         "--check-config",
         action="store_true",
         help="Validate environment and rules without connecting to external services",
     )
-    parser.add_argument(
+    mode.add_argument(
         "--retry-ignored",
         action="store_true",
         help="Retry emails previously stored as ignored_unknown_subject",
     )
-    parser.add_argument(
+    mode.add_argument(
         "--scan-last",
         type=int,
         metavar="N",
         help="Inspect the last N mailbox emails, regardless of the saved last UID",
+    )
+    mode.add_argument(
+        "--scan-since",
+        type=date.fromisoformat,
+        metavar="YYYY-MM-DD",
+        help="Inspect emails received on or after this date, regardless of the saved last UID",
     )
     return parser.parse_args()
 
@@ -109,6 +117,10 @@ def main() -> int:
             service.scan_recent(args.scan_last)
             return 0
 
+        if args.scan_since is not None:
+            service.scan_since(args.scan_since)
+            return 0
+
         while not STOP_REQUESTED:
             try:
                 count = service.run_once()
@@ -116,6 +128,8 @@ def main() -> int:
                     LOGGER.info("Mailbox pass complete: %d email(s) inspected", count)
             except Exception:
                 LOGGER.exception("Mailbox pass failed")
+                if args.once:
+                    return 1
 
             if args.once:
                 break

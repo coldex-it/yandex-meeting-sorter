@@ -28,9 +28,9 @@ services:
         echo "[$$(date -Iseconds)] Meeting sorter scheduler started"
 
         while true; do
-          echo "[$$(date -Iseconds)] Scanning last 10 mailbox emails"
+          echo "[$$(date -Iseconds)] Scanning all new mailbox emails since the saved UID"
 
-          python -m app.main --scan-last 10
+          python -m app.main --once
           status=$$?
 
           echo "[$$(date -Iseconds)] Scan finished with exit code $$status"
